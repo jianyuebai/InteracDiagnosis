@@ -4,15 +4,11 @@ Title: InteracDiagnosis
 Version: 0.0.1
 Authors@R: c(
     person("Selenge", role = "ctb"),
-    person("Jianyue", role = c("aut", "cre"))
-)
+    person("Jianyue", role = c("aut", "cre"), email = "jianyue.bai@mail.utoronto.ca")))
 Description: see README
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-Imports:
-    shiny
-
-
+Imports: shiny
