@@ -4,7 +4,7 @@ Title: InteracDiagnosis
 Version: 0.0.1
 Authors@R: c(
     person("Selenge", role = "ctb"),
-    person("Jianyue", role = c("aut", "cre"), email = "jianyue.bai@mail.utoronto.ca")))
+    person("Jianyue", role = c("aut", "cre"), email = "jianyue.bai@mail.utoronto.ca"))
 Description: see README
 License: MIT + file LICENSE
 Encoding: UTF-8
