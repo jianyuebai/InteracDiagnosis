@@ -1,5 +1,4 @@
 library(shiny)
-library(ggplot2)
 
 # ------------------------------------------------------------
 # Bootstrap coefficient table for an lm model (pairs bootstrap)
