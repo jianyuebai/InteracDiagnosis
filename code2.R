@@ -1,9 +1,5 @@
-
 library(shiny)
 library(ggplot2)
-
-# app.R
-library(shiny)
 
 # ------------------------------------------------------------
 # Bootstrap coefficient table for an lm model (pairs bootstrap)
@@ -134,6 +130,58 @@ coef_compare <- function(modA, modB) {
   )
 }
 
+# ------------------------------------------------------------
+# Helper: check nesting (A nested in B) based on terms
+# ------------------------------------------------------------
+is_nested_lm <- function(modA, modB) {
+  # same response?
+  yA <- all.vars(formula(modA))[1]
+  yB <- all.vars(formula(modB))[1]
+  if (!identical(yA, yB)) return(FALSE)
+  
+  # compare term labels (ignoring order)
+  tA <- attr(terms(modA), "term.labels")
+  tB <- attr(terms(modB), "term.labels")
+  all(tA %in% tB)
+}
+
+# ------------------------------------------------------------
+# Helper: K-fold CV metrics for lm(formula, data)
+# ------------------------------------------------------------
+cv_lm_metrics <- function(formula, data, K = 5, seed = 1) {
+  set.seed(seed)
+  n <- nrow(data)
+  # random fold assignments
+  folds <- sample(rep(seq_len(K), length.out = n))
+  
+  yname <- all.vars(formula)[1]
+  y <- data[[yname]]
+  
+  pred <- rep(NA_real_, n)
+  
+  for (k in seq_len(K)) {
+    idx_te <- which(folds == k)
+    idx_tr <- which(folds != k)
+    fit <- lm(formula, data = data[idx_tr, , drop = FALSE])
+    pred[idx_te] <- predict(fit, newdata = data[idx_te, , drop = FALSE])
+  }
+  
+  resid <- y - pred
+  rmse <- sqrt(mean(resid^2, na.rm = TRUE))
+  mae  <- mean(abs(resid), na.rm = TRUE)
+  
+  # out-of-sample R^2 (defined vs mean(y))
+  ss_res <- sum(resid^2, na.rm = TRUE)
+  ss_tot <- sum((y - mean(y, na.rm = TRUE))^2, na.rm = TRUE)
+  r2 <- 1 - ss_res / ss_tot
+  
+  data.frame(
+    metric = c("RMSE", "MAE", "CV_R2"),
+    value  = c(rmse, mae, r2),
+    row.names = NULL
+  )
+}
+
 # -----------------------------
 # UI
 # -----------------------------
@@ -147,10 +195,8 @@ ui <- fluidPage(
       
       tags$hr(),
       
-      # IMPORTANT: outcome selector is STATIC (not inside renderUI)
       selectInput("ycol", "Outcome (y)", choices = character(0)),
       
-      # predictors selector is dynamic (depends on ycol + uploaded data)
       uiOutput("pred_ui"),
       
       tags$hr(),
@@ -158,6 +204,14 @@ ui <- fluidPage(
       conditionalPanel(
         condition = "input.use_boot == true",
         sliderInput("B", "Bootstrap resamples (B)", min = 200, max = 1000, value = 200, step = 200)
+      ),
+      
+      tags$hr(),
+      checkboxInput("use_cv", "Compute K-fold CV (prediction comparison)", FALSE),
+      conditionalPanel(
+        condition = "input.use_cv == true",
+        sliderInput("K", "Number of folds (K)", min = 3, max = 10, value = 5, step = 1),
+        numericInput("cv_seed", "CV seed", value = 1, min = 1, step = 1)
       )
     ),
     
@@ -175,6 +229,21 @@ ui <- fluidPage(
           "Coefficient shifts",
           tags$h4("Raw coefficients aligned (B - A shows change)"),
           tableOutput("coef_tbl")
+        ),
+        
+        tabPanel(
+          "Model comparison tests",
+          tags$h4("Information criteria (always available)"),
+          tableOutput("ic_tbl"),
+          
+          tags$hr(),
+          tags$h4("Nested-model test (only if Model A is nested in Model B)"),
+          verbatimTextOutput("nested_txt"),
+          tableOutput("anova_tbl"),
+          
+          tags$hr(),
+          tags$h4("Cross-validation (optional)"),
+          tableOutput("cv_tbl")
         ),
         
         tabPanel(
@@ -337,7 +406,76 @@ server <- function(input, output, session) {
     coef_compare(modelA(), modelB())
   }, rownames = FALSE, digits = 4)
   
-  # 9) Side-by-side partial plots for union of predictors included in either model
+  # -----------------------------
+  # Model comparison outputs
+  # -----------------------------
+  
+  # AIC/BIC always
+  output$ic_tbl <- renderTable({
+    mA <- modelA()
+    mB <- modelB()
+    data.frame(
+      model = c("Model A", "Model B"),
+      df    = c(df.residual(mA), df.residual(mB)),
+      AIC   = c(AIC(mA), AIC(mB)),
+      BIC   = c(BIC(mA), BIC(mB)),
+      row.names = NULL
+    )
+  }, digits = 4)
+  
+  # Nested check + ANOVA (partial F-test) if nested
+  output$nested_txt <- renderText({
+    mA <- modelA()
+    mB <- modelB()
+    nested <- is_nested_lm(mA, mB)
+    if (nested) {
+      "Model A appears nested in Model B (same outcome, all terms in A are contained in B). Partial F-test is shown below."
+    } else {
+      "Models do NOT appear nested (or outcomes differ). Partial F-test via anova(A, B) is not valid/meaningful here."
+    }
+  })
+  
+  output$anova_tbl <- renderTable({
+    mA <- modelA()
+    mB <- modelB()
+    if (!is_nested_lm(mA, mB)) return(NULL)
+    
+    # anova gives the partial F-test for nested lm models
+    an <- anova(mA, mB)
+    # make it a plain data.frame for tableOutput
+    out <- as.data.frame(an)
+    out$Model <- rownames(out)
+    out <- out[, c("Model", setdiff(names(out), "Model")), drop = FALSE]
+    rownames(out) <- NULL
+    out
+  }, digits = 4)
+  
+  # Optional K-fold CV comparison
+  output$cv_tbl <- renderTable({
+    req(input$use_cv)
+    dat <- data_reactive()
+    
+    resA <- cv_lm_metrics(formA(), dat, K = input$K, seed = input$cv_seed)
+    resB <- cv_lm_metrics(formB(), dat, K = input$K, seed = input$cv_seed)
+    
+    merge(
+      transform(resA, model = "Model A"),
+      transform(resB, model = "Model B"),
+      by = c("metric"),
+      suffixes = c("_A", "_B"),
+      all = TRUE
+    ) |> within({
+      # Clean layout: metric, Model A, Model B
+      Model_A <- value_A
+      Model_B <- value_B
+      value_A <- NULL
+      value_B <- NULL
+    }) |> subset(select = c(metric, Model_A, Model_B))
+  }, digits = 4)
+  
+  # -----------------------------
+  # Partial plots (side-by-side)
+  # -----------------------------
   output$pp_side <- renderPlot({
     dat <- data_reactive()
     modA <- modelA()
@@ -405,5 +543,12 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui, server)
+
+
+
+
+
+
+
 
 
