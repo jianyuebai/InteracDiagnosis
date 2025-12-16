@@ -21,6 +21,9 @@ This is a basic example which shows you how to solve a common problem:
 
 ``` r
 library(InteracDiagnosis)
-## basic example code
+run_shiny_app()
+[Compare models (uploaded CSV): coefficient shifts + partial plots + bootstrap SE.pdf](https://github.com/user-attachments/files/24180940/Compare.models.uploaded.CSV.coefficient.shifts.%2B.partial.plots.%2B.bootstrap.SE.pdf)
+
+
 ```
 
